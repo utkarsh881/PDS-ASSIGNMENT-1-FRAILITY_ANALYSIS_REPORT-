@@ -1,0 +1,105 @@
+
+import pandas as pd
+import os
+
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import units
+
+data = {
+    "Height_in": [65.8, 71.5, 69.4, 68.2, 67.8, 68.7, 69.8, 70.1, 67.9, 66.8],
+    "Weight_lb": [112, 136, 153, 142, 144, 123, 141, 136, 112, 120],
+    "Age_yr": [30, 19, 45, 22, 29, 50, 51, 23, 17, 39],
+    "Grip_kg": [30, 31, 29, 28, 24, 26, 22, 20, 19, 31],
+    "Frailty": ["N", "N", "N", "Y", "Y", "N", "Y", "Y", "N", "N"]
+}
+
+df = pd.DataFrame(data)
+
+
+df.to_csv("frailty_raw.csv", index=False)
+
+df = pd.read_csv("frailty_raw.csv")
+
+
+
+df["Height_m"] = df["Height_in"] * 0.0254
+df["Weight_kg"] = df["Weight_lb"] * 0.45359237
+
+
+df["BMI"] = (df["Weight_kg"] / (df["Height_m"] ** 2)).round(2)
+
+def age_group(age):
+    if age < 30:
+        return "<30"
+    elif 30 <= age <= 45:
+        return "30–45"
+    elif 46 <= age <= 60:
+        return "46–60"
+    else:
+        return ">60"
+
+df["AgeGroup"] = df["Age_yr"].apply(age_group)
+
+
+df["Frailty_binary"] = df["Frailty"].map({"Y": 1, "N": 0}).astype("int8")
+
+age_dummies = pd.get_dummies(df["AgeGroup"], prefix="AgeGroup")
+df = pd.concat([df, age_dummies], axis=1)
+
+
+summary_table = df.describe().loc[["mean", "50%", "std"]]
+summary_table.rename(index={"50%": "median"}, inplace=True)
+summary_table = summary_table.round(3)
+
+correlation = round(df["Grip_kg"].corr(df["Frailty_binary"]), 4)
+
+
+file_path = "Frailty_Analysis_Report.pdf"
+doc = SimpleDocTemplate(file_path)
+elements = []
+styles = getSampleStyleSheet()
+
+
+elements.append(Paragraph("<b>Frailty Data Analysis Report</b>", styles["Title"]))
+elements.append(Spacer(1, 12))
+
+elements.append(Paragraph("<b>1. Summary Statistics (Mean / Median / Std)</b>", styles["Heading2"]))
+elements.append(Spacer(1, 12))
+
+table_data = [["Statistic"] + list(summary_table.columns)]
+
+for idx, row in summary_table.iterrows():
+    table_data.append([idx] + list(row))
+
+table = Table(table_data)
+table.setStyle(TableStyle([
+    ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+    ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+    ('ALIGN', (1,1), (-1,-1), 'CENTER')
+]))
+
+elements.append(table)
+elements.append(Spacer(1, 24))
+
+
+elements.append(Paragraph("<b>2. Grip Strength vs Frailty Correlation</b>", styles["Heading2"]))
+elements.append(Spacer(1, 12))
+
+elements.append(Paragraph(
+    f"The correlation between Grip Strength (kg) and Frailty (binary) is: <b>{correlation}</b>",
+    styles["Normal"]
+))
+elements.append(Spacer(1, 12))
+
+elements.append(Paragraph(
+    "Interpretation: The negative correlation indicates that lower grip strength "
+    "is associated with higher frailty among participants.",
+    styles["Normal"]
+))
+
+doc.build(elements)
+
+print("PDF generated successfully!")
+print("Saved as:", file_path)
